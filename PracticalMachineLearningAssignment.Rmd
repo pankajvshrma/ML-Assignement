@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning Assignment"
+author: "Pankaj Sharma"
+date: "7 November 2015"
+output: html_document
+---
+This is an assignment of coursera Pratical Machine Learning Course.Here we are using Random Forests for modelling the data.We also set seed to make program reproductible.We use library doParallel apart from caret already shown in course.We use library pROC for plotting the ROC curve.We use package randomForest for random forests.
+
+
+```{r loading required libraries}
+options(warn=-1)
+library(caret)
+library(doParallel)
+library(randomForest)
+library(pROC)
+
+ 
+```
+
+First Step is to read CSV training file
+
+```{r Reading the CSV}
+
+
+set.seed(123)
+
+training<-read.csv("D:/pml-training.csv",header=TRUE)
+
+
+```
+Seperating class feature from training
+
+```{r Seperating class feature from training}
+X.train<-training
+
+Y.train =training[,length(training)]
+```
+Checking for NA's in data and filling them with mean if feature is numeric
+Forcing Features which are factors as numeric and replacing #DIV/0! as factor 2
+
+```{r Checking for NAs}
+
+for(i in 1:ncol(X.train))
+{
+
+if (class(X.train[,i])== 'integer' | class(X.train[,i])== 'numeric' )
+  {
+meanXi=mean(X.train[,i],na.rm=TRUE)
+   for(j in 1:nrow(X.train))
+     {
+      if(is.na(X.train[j,i]))
+        X.train[j,i]= meanXi
+         
+       }
+}
+if(class(X.train[,i])== 'factor')
+  X.train[,i]=as.numeric(X.train[,i])
+
+}
+
+```
+Now converting back the last column of class as factor again
+```{r }
+X.train[,ncol(X.train)]<-as.factor(X.train[,ncol(X.train)])
+```
+Removing columns which dont have complete observations
+```{r }
+featuresnames <- colnames(X.train[colSums(is.na(X.train)) == 0])[-(1:7)]
+features <- X.train[featuresnames]
+
+```
+Dividing dataset into 70:30 and doing cross validation
+```{r }
+xdata <- createDataPartition(y=features$classe, p=3/4, list=FALSE )
+training <- features[xdata,]
+testing <- features[-xdata,]
+```
+Registering with doParallel library and making a cluster of 3 cores
+```{r }
+require(doParallel)
+
+registerDoParallel(cores=detectCores(all.tests=TRUE))
+
+cores <- detectCores()
+cl <- makePSOCKcluster(3)
+registerDoParallel(cl)
+```
+Fitting random Forests in parallel with a total of 600 trees
+```{r }
+fit.rf <- foreach(ntree=rep(200, 3), .combine=combine, 
+                  .packages="randomForest") %dopar% {
+  randomForest(training[,-ncol(training)], training$classe, importance = TRUE, ntree = ntree)
+}
+
+```
+Getting importance of top five variables based on decreasing gini index  and stopping the cluster
+```{r }
+head(importance(fit.rf, type=2))
+stopCluster(cl)
+
+```
+Printing confusion matrix with the training data.Insample error is too low.
+```{r }
+rf.pred <- predict(fit.rf,training, type="class")
+rf.perf <- table(training$classe,rf.pred ,dnn=c("Actual", "Predicted"))
+confusionMatrix(rf.perf)
+
+```
+Printing confusion matrix with the test data.Out of sample error is too low as Accuracy achieved was 99.55%
+```{r }
+rf.pred <- predict(fit.rf,testing, type="class")
+rf.perf <- table(testing$classe,rf.pred ,dnn=c("Actual", "Predicted"))
+rf.perf
+confusionMatrix(rf.perf)
+
+```
+Plotting the ROC curve with the sensitivity and specificity thresholds.It showed that area under curve was very close to best prediction.
+
+```{r, echo=FALSE}
+library(pROC)
+rf.pred<-as.numeric(rf.pred)
+rocobj<-multiclass.roc(testing$classe,rf.pred,percent=TRUE)
+plot.roc(testing$classe,rf.pred,ci=TRUE, of="thresholds", type="shape", col="blue")
+
+```
+Thankyou all,It was fun doing this assignment.
